@@ -1,0 +1,128 @@
+// Row-Level Multi-tenancy: todas as tabelas de negócio possuem `tenant_id`.
+// Relações entre entidades do mesmo tenant usam FK composta (id, tenant_id),
+// impedindo no nível do banco que um registro aponte para dados de outra empresa.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  document  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users          User[]
+  products       Product[]
+  variations     ProductVariation[]
+  stockLocations StockLocation[]
+  stockItems     StockItem[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String   @map("tenant_id")
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(MEMBER)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  sku       String
+  barcode   String?
+  price     Decimal  @db.Decimal(12, 2)
+  cost      Decimal? @db.Decimal(12, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  variations ProductVariation[]
+  stockItems StockItem[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, sku])
+  @@index([tenantId, name])
+  @@map("products")
+}
+
+model ProductVariation {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  productId String   @map("product_id")
+  sku       String
+  barcode   String?
+  color     String?
+  size      String?
+  price     Decimal? @db.Decimal(12, 2)
+  cost      Decimal? @db.Decimal(12, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product    Product     @relation(fields: [productId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  stockItems StockItem[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, sku])
+  @@index([tenantId, productId])
+  @@map("product_variations")
+}
+
+model StockLocation {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stockItems StockItem[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, name])
+  @@map("stock_locations")
+}
+
+model StockItem {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  productId   String   @map("product_id")
+  variationId String?  @map("variation_id")
+  locationId  String   @map("location_id")
+  quantity    Decimal  @default(0) @db.Decimal(14, 3)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product   Product           @relation(fields: [productId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  variation ProductVariation? @relation(fields: [variationId], references: [id], onDelete: Cascade)
+  location  StockLocation     @relation(fields: [locationId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([locationId, productId, variationId])
+  @@index([tenantId, productId])
+  @@map("stock_items")
+}
