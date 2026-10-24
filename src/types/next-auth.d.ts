@@ -1,18 +1,11 @@
 import type { DefaultSession } from "next-auth";
 
-import type { Role } from "@/generated/prisma/enums";
-
+// O JWT guarda apenas a identidade do usuário. Loja ativa e perfil são
+// resolvidos no servidor a cada requisição (ver `src/lib/dal.ts`).
 declare module "next-auth" {
-  interface User {
-    tenantId: string;
-    role: Role;
-  }
-
   interface Session {
     user: {
       id: string;
-      tenantId: string;
-      role: Role;
     } & DefaultSession["user"];
   }
 }
@@ -20,7 +13,5 @@ declare module "next-auth" {
 declare module "next-auth/jwt" {
   interface JWT {
     id?: string;
-    tenantId?: string;
-    role?: Role;
   }
 }

@@ -2,11 +2,11 @@
 
 import bcrypt from "bcryptjs";
 import { AuthError } from "next-auth";
-import { z } from "zod";
 
 import { signIn, signOut } from "@/auth";
 import { prisma } from "@/lib/db";
-import { type ActionResult } from "@/lib/action-result";
+import { fail, invalid, type ActionResult } from "@/lib/action-result";
+import { isUniqueViolation } from "@/lib/prisma-errors";
 import {
   loginSchema,
   signUpSchema,
@@ -31,28 +31,31 @@ export async function loginAction(input: LoginInput): Promise<ActionResult> {
 
 export async function signUpAction(input: SignUpInput): Promise<ActionResult> {
   const parsed = signUpSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: "Dados inválidos", fieldErrors: z.flattenError(parsed.error).fieldErrors };
-  }
+  if (!parsed.success) return invalid(parsed.error);
 
   const { companyName, name, email, password } = parsed.data;
+  const emailTaken = () => fail("E-mail já cadastrado", { email: ["E-mail já cadastrado"] });
 
   const exists = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-  if (exists) {
-    return { ok: false, error: "E-mail já cadastrado", fieldErrors: { email: ["E-mail já cadastrado"] } };
-  }
+  if (exists) return emailTaken();
 
   const passwordHash = await bcrypt.hash(password, 12);
 
-  await prisma.$transaction(async (tx) => {
-    const tenant = await tx.tenant.create({ data: { name: companyName } });
-    await tx.user.create({
-      data: { tenantId: tenant.id, name, email, passwordHash, role: "ADMIN" },
+  try {
+    await prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.create({ data: { name: companyName } });
+      const user = await tx.user.create({ data: { name, email, passwordHash } });
+      await tx.membership.create({ data: { tenantId: tenant.id, userId: user.id, role: "ADMIN" } });
+      await tx.stockLocation.create({
+        data: { tenantId: tenant.id, name: "Depósito principal" },
+      });
     });
-    await tx.stockLocation.create({
-      data: { tenantId: tenant.id, name: "Depósito principal" },
-    });
-  });
+  } catch (error) {
+    // Dois cadastros simultâneos com o mesmo e-mail: a checagem acima passa nos dois,
+    // mas o índice único do banco recusa o segundo.
+    if (isUniqueViolation(error)) return emailTaken();
+    throw error;
+  }
 
   await signIn("credentials", { email, password, redirectTo: "/dashboard" });
   return { ok: true };

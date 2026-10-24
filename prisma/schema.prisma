@@ -3,8 +3,9 @@
 // impedindo no nível do banco que um registro aponte para dados de outra empresa.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -16,6 +17,12 @@ enum Role {
   MEMBER
 }
 
+enum StockMovementType {
+  IN
+  OUT
+  ADJUSTMENT
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -23,29 +30,44 @@ model Tenant {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users          User[]
+  memberships    Membership[]
   products       Product[]
   variations     ProductVariation[]
   stockLocations StockLocation[]
   stockItems     StockItem[]
+  stockMovements StockMovement[]
 
   @@map("tenants")
 }
 
+// Login global: um usuário pode acessar várias lojas (tenants) via Membership.
 model User {
   id           String   @id @default(cuid())
-  tenantId     String   @map("tenant_id")
   name         String
   email        String   @unique
   passwordHash String   @map("password_hash")
-  role         Role     @default(MEMBER)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships Membership[]
 
-  @@index([tenantId])
   @@map("users")
+}
+
+// Vínculo usuário ↔ loja, com o perfil do usuário naquela loja.
+model Membership {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  userId    String   @map("user_id")
+  role      Role     @default(MEMBER)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@map("memberships")
 }
 
 model Product {
@@ -59,9 +81,10 @@ model Product {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  variations ProductVariation[]
-  stockItems StockItem[]
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  variations     ProductVariation[]
+  stockItems     StockItem[]
+  stockMovements StockMovement[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, sku])
@@ -82,9 +105,10 @@ model ProductVariation {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product    Product     @relation(fields: [productId, tenantId], references: [id, tenantId], onDelete: Cascade)
-  stockItems StockItem[]
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product        Product         @relation(fields: [productId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  stockItems     StockItem[]
+  stockMovements StockMovement[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, sku])
@@ -99,8 +123,9 @@ model StockLocation {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  stockItems StockItem[]
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stockItems     StockItem[]
+  stockMovements StockMovement[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, name])
@@ -119,10 +144,43 @@ model StockItem {
 
   tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product   Product           @relation(fields: [productId, tenantId], references: [id, tenantId], onDelete: Cascade)
-  variation ProductVariation? @relation(fields: [variationId], references: [id], onDelete: Cascade)
+  variation ProductVariation? @relation(fields: [variationId, tenantId], references: [id, tenantId], onDelete: Cascade)
   location  StockLocation     @relation(fields: [locationId, tenantId], references: [id, tenantId], onDelete: Cascade)
 
-  @@unique([locationId, productId, variationId])
+  // Saldo único por depósito: um para o produto sem variação e um por variação.
+  // Índices parciais, pois no PostgreSQL valores NULL não colidem em índices únicos.
+  @@unique([locationId, productId], where: { variationId: null }, map: "stock_items_location_product_no_variation_key")
+  @@unique([locationId, variationId], where: { variationId: { not: null } }, map: "stock_items_location_variation_key")
   @@index([tenantId, productId])
+  @@index([tenantId, locationId])
   @@map("stock_items")
+}
+
+// Histórico imutável de movimentações. `quantity` é a variação com sinal
+// (positivo = entrada, negativo = saída) e `balanceAfter` o saldo resultante.
+// `createdById`/`createdByName` são um registro de auditoria (sem FK) para que
+// o histórico sobreviva à remoção do usuário.
+model StockMovement {
+  id            String            @id @default(cuid())
+  tenantId      String            @map("tenant_id")
+  productId     String            @map("product_id")
+  variationId   String?           @map("variation_id")
+  locationId    String            @map("location_id")
+  type          StockMovementType
+  quantity      Decimal           @db.Decimal(14, 3)
+  balanceAfter  Decimal           @map("balance_after") @db.Decimal(14, 3)
+  note          String?
+  createdById   String?           @map("created_by_id")
+  createdByName String            @map("created_by_name")
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product   Product           @relation(fields: [productId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  variation ProductVariation? @relation(fields: [variationId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  location  StockLocation     @relation(fields: [locationId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, productId])
+  @@index([tenantId, locationId])
+  @@map("stock_movements")
 }

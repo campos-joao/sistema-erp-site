@@ -3,11 +3,12 @@ import "server-only";
 import { prisma } from "@/lib/db";
 
 const TENANT_SCOPED_MODELS = new Set([
-  "User",
+  "Membership",
   "Product",
   "ProductVariation",
   "StockLocation",
   "StockItem",
+  "StockMovement",
 ]);
 
 const WHERE_OPERATIONS = new Set([

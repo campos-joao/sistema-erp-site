@@ -6,7 +6,11 @@ import { PrismaClient } from "@/generated/prisma/client";
 
 const createPrismaClient = () =>
   new PrismaClient({
-    adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+    adapter: new PrismaPg({
+      connectionString: process.env.DATABASE_URL,
+      // Limite do pool (padrão do `pg`: 10). Reduza para bancos com poucas conexões, ex.: `prisma dev`.
+      max: Number(process.env.DATABASE_POOL_MAX) || undefined,
+    }),
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 

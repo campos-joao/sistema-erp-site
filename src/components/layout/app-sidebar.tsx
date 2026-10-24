@@ -1,6 +1,6 @@
 "use client";
 
-import { Boxes, LayoutDashboard, Package, Settings, Warehouse, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Package, Settings, Warehouse, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -17,7 +17,9 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { TenantSwitcher } from "@/components/layout/tenant-switcher";
 import { UserMenu } from "@/components/layout/user-menu";
+import type { Role } from "@/generated/prisma/enums";
 
 const NAV_ITEMS: { title: string; href: string; icon: LucideIcon }[] = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -27,31 +29,18 @@ const NAV_ITEMS: { title: string; href: string; icon: LucideIcon }[] = [
 ];
 
 type AppSidebarProps = {
-  tenantName: string;
+  tenants: { id: string; name: string; role: Role }[];
+  activeTenantId: string;
   user: { name: string; email: string };
 };
 
-export function AppSidebar({ tenantName, user }: AppSidebarProps) {
+export function AppSidebar({ tenants, activeTenantId, user }: AppSidebarProps) {
   const pathname = usePathname();
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link href="/dashboard">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                  <Boxes className="size-4" />
-                </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">ERP</span>
-                  <span className="truncate text-xs text-muted-foreground">{tenantName}</span>
-                </div>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <TenantSwitcher tenants={tenants} activeTenantId={activeTenantId} />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

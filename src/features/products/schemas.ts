@@ -1,25 +1,41 @@
 import { z } from "zod";
 
-/** Aceita "19,90", "1.234,56", "R$ 10" ou "19.90" e normaliza para "1234.56". */
-const normalizeMoney = (value: string) => {
-  const clean = value.replace(/R\$|\s/g, "");
-  return clean.includes(",") ? clean.replace(/\./g, "").replace(",", ".") : clean;
-};
+import { money, optionalMoney, optionalText, skuSchema } from "@/lib/schema-helpers";
 
-export const createProductSchema = z.object({
+export const productSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do produto").max(150),
-  sku: z
-    .string()
-    .trim()
-    .min(1, "Informe o SKU")
-    .max(60)
-    .regex(/^[\w.\-/]+$/, "Use apenas letras, números, '.', '-', '_' ou '/'"),
-  price: z
-    .string()
-    .trim()
-    .min(1, "Informe o preço")
-    .transform(normalizeMoney)
-    .pipe(z.string().regex(/^\d{1,10}(\.\d{1,2})?$/, "Preço inválido (ex.: 19,90)")),
+  sku: skuSchema,
+  barcode: optionalText(50),
+  price: money("Informe o preço"),
+  cost: optionalMoney(),
 });
 
-export type CreateProductInput = z.input<typeof createProductSchema>;
+export type ProductInput = z.input<typeof productSchema>;
+export type ProductData = z.output<typeof productSchema>;
+
+export const variationSchema = z
+  .object({
+    sku: skuSchema,
+    barcode: optionalText(50),
+    color: optionalText(50),
+    size: optionalText(30),
+    price: optionalMoney(),
+    cost: optionalMoney(),
+  })
+  .refine((data) => data.color || data.size, {
+    message: "Informe a cor e/ou o tamanho",
+    path: ["color"],
+  });
+
+export type VariationInput = z.input<typeof variationSchema>;
+export type VariationData = z.output<typeof variationSchema>;
+
+export const PRODUCT_TYPE_FILTERS = [
+  { value: "simples", label: "Sem variações" },
+  { value: "variacoes", label: "Com variações" },
+];
+
+export const PRODUCT_STOCK_FILTERS = [
+  { value: "com", label: "Com saldo" },
+  { value: "sem", label: "Sem saldo" },
+];
